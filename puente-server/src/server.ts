@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import {
   acceptedContent,
@@ -18,6 +19,10 @@ import { drafts, mailtoLink, saveDraft, writeDraft, type Draft } from './message
 
 const calendarUri = 'puente://family/calendar.ics';
 const draftsUri = 'puente://family/drafts';
+
+// MCP App (spec 2026-01-26): hosts that support it show this bilingual card for explain_notice results.
+const noticeCardUri = 'ui://puente/notice-card.html';
+const noticeCardHtml = readFileSync(new URL('../ui/notice-card.html', import.meta.url), 'utf8');
 
 // A draft waiting for the parent's OK travels inside the signed requestState, so the text saved
 // is exactly the text the parent approved. Set PUENTE_STATE_SECRET when running more than one process.
@@ -55,7 +60,8 @@ const explanationOutput = z.object({
   events: z.array(eventSchema),
   costs: z.array(costSchema),
   actions: z.array(actionSchema),
-  glossary: z.array(z.object({ term: z.string(), meaning: z.string() }))
+  glossary: z.array(z.object({ term: z.string(), meaning: z.string() })),
+  original: z.object({ from: z.string(), subject: z.string(), body: z.string(), receivedAt: z.string() })
 });
 
 const calendarEntry = z.object({
@@ -169,7 +175,8 @@ function buildServer(): McpServer {
         'must do. Use it when the parent asks what a notice says or what they have to do. Say `spoken` out loud and show ' +
         '`summary` on screen. Marks the notice as read.',
       inputSchema: z.object({ id: z.string().describe('Notice id returned by list_notices, for example "n-002".') }),
-      outputSchema: explanationOutput
+      outputSchema: explanationOutput,
+      _meta: { ui: { resourceUri: noticeCardUri } }
     },
     async ({ id }) => {
       const notice = findNotice(id);
@@ -180,7 +187,8 @@ function buildServer(): McpServer {
         childName: childById(notice.childId)?.name ?? notice.childId,
         subject: notice.subject,
         ...explanation,
-        glossary: glossaryFor(`${notice.subject} ${notice.body}`)
+        glossary: glossaryFor(`${notice.subject} ${notice.body}`),
+        original: { from: notice.from, subject: notice.subject, body: notice.body, receivedAt: notice.receivedAt }
       };
       return {
         content: [{ type: 'text', text: JSON.stringify(output) }],
@@ -376,6 +384,19 @@ function buildServer(): McpServer {
         requestState: await stateCodec.mint({ draft }, ctx)
       });
     }
+  );
+
+  server.registerResource(
+    'notice-card',
+    noticeCardUri,
+    {
+      title: 'Bilingual notice card',
+      description: 'MCP App that shows an explained notice in Spanish next to the original English text.',
+      mimeType: 'text/html;profile=mcp-app'
+    },
+    async uri => ({
+      contents: [{ uri: uri.href, mimeType: 'text/html;profile=mcp-app', text: noticeCardHtml }]
+    })
   );
 
   server.registerResource(

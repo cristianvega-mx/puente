@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Puente · aviso explicado</title>
+    <style>
+      :root {
+        --text: #f4f7fb;
+        --muted: #9fb0c3;
+        --accent: #00caff;
+        --accent-soft: rgba(0, 202, 255, 0.16);
+        --panel: rgba(255, 255, 255, 0.06);
+        --line: rgba(255, 255, 255, 0.12);
+        --urgent: #ffb454;
+      }
+      :root[data-theme='light'] {
+        --text: #13202e;
+        --muted: #52647a;
+        --accent: #0077a8;
+        --accent-soft: rgba(0, 119, 168, 0.12);
+        --panel: rgba(0, 0, 0, 0.04);
+        --line: rgba(0, 0, 0, 0.12);
+        --urgent: #b35c00;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        color: var(--text);
+        font: 16px/1.4 Inter, system-ui, sans-serif;
+      }
+      .card {
+        display: grid;
+        grid-template-columns: 1.55fr 1fr;
+        gap: 14px;
+      }
+      @media (max-width: 560px) {
+        .card {
+          grid-template-columns: 1fr;
+        }
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px 16px;
+      }
+      .kicker {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .urgent {
+        color: var(--urgent);
+      }
+      h1 {
+        margin: 6px 0 10px;
+        font-size: 20px;
+        line-height: 1.3;
+      }
+      h2 {
+        margin: 12px 0 6px;
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      li {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 3px 0;
+      }
+      .chip {
+        flex: none;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: 999px;
+        padding: 1px 9px;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .deadline .chip {
+        background: rgba(255, 180, 84, 0.16);
+        color: var(--urgent);
+      }
+      .box {
+        flex: none;
+        width: 15px;
+        height: 15px;
+        border: 2px solid var(--muted);
+        border-radius: 4px;
+        transform: translateY(2px);
+      }
+      .glossary dt {
+        font-weight: 600;
+      }
+      .glossary dd {
+        margin: 0 0 6px;
+        color: var(--muted);
+      }
+      .original {
+        font-size: 13.5px;
+        color: var(--muted);
+      }
+      .original .subject {
+        color: var(--text);
+        font-weight: 600;
+        margin: 6px 0;
+      }
+      .original .from {
+        font-size: 12px;
+      }
+      .original p {
+        margin: 8px 0 0;
+      }
+      .empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root"><p class="empty">Cargando aviso…</p></main>
+    <script>
+      // MCP App (spec 2026-01-26): talks JSON-RPC with the host over postMessage.
+      const root = document.getElementById('root');
+      let locale = 'es-MX';
+      let nextId = 1;
+      const waiting = new Map();
+
+      function send(message) {
+        window.parent.postMessage({ jsonrpc: '2.0', ...message }, '*');
+      }
+      function request(method, params) {
+        const id = nextId++;
+        send({ id, method, params });
+        return new Promise(resolve => waiting.set(id, resolve));
+      }
+      function notify(method, params) {
+        send({ method, params });
+      }
+
+      function node(tag, className, text) {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (text !== undefined) element.textContent = text;
+        return element;
+      }
+
+      function sayDate(iso) {
+        const text = new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(
+          new Date(iso + 'T12:00:00Z')
+        );
+        return text.charAt(0).toUpperCase() + text.slice(1);
+      }
+
+      function list(items, render) {
+        const ul = node('ul');
+        for (const item of items) ul.append(render(item));
+        return ul;
+      }
+
+      function render(data) {
+        if (!data || !data.summary) return;
+        const spanish = node('section');
+        const kicker = node('div', 'kicker');
+        kicker.append(node('span', '', `${data.childName} · explicado en español`));
+        if (data.urgency === 'high') kicker.append(node('span', 'urgent', 'Importante'));
+        spanish.append(kicker, node('h1', '', data.summary));
+
+        if (data.events?.length) {
+          spanish.append(node('h2', '', 'Fechas'));
+          spanish.append(
+            list(data.events, event => {
+              const li = node('li', event.kind === 'deadline' ? 'deadline' : '');
+              const when = sayDate(event.date) + (event.startTime ? ` · ${event.startTime}` : '');
+              li.append(node('span', 'chip', when), node('span', '', event.title));
+              return li;
+            })
+          );
+        }
+        if (data.actions?.length) {
+          spanish.append(node('h2', '', 'Qué hacer'));
+          spanish.append(
+            list(data.actions, action => {
+              const li = node('li');
+              li.append(node('span', 'box'), node('span', '', action.what + (action.by ? ` — antes del ${sayDate(action.by).toLowerCase()}` : '')));
+              return li;
+            })
+          );
+        }
+        if (data.costs?.length) {
+          spanish.append(node('h2', '', 'Costos'));
+          spanish.append(
+            list(data.costs, cost => {
+              const li = node('li');
+              const amount = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cost.amountUsd);
+              li.append(node('span', 'chip', amount), node('span', '', cost.what));
+              return li;
+            })
+          );
+        }
+        if (data.glossary?.length) {
+          spanish.append(node('h2', '', 'Palabras que verá otra vez'));
+          const dl = node('dl', 'glossary');
+          for (const entry of data.glossary) dl.append(node('dt', '', entry.term), node('dd', '', entry.meaning));
+          spanish.append(dl);
+        }
+
+        const english = node('section', 'original');
+        english.append(node('div', 'kicker', 'Original · English'));
+        if (data.original) {
+          english.append(node('div', 'subject', data.original.subject), node('div', 'from', data.original.from), node('p', '', data.original.body));
+        }
+
+        const card = node('div', 'card');
+        card.append(spanish, english);
+        root.replaceChildren(card);
+      }
+
+      function applyContext(context) {
+        if (!context) return;
+        if (context.theme) document.documentElement.dataset.theme = context.theme;
+        if (context.locale) locale = context.locale;
+      }
+
+      window.addEventListener('message', event => {
+        if (event.source !== window.parent) return;
+        const message = event.data;
+        if (!message || message.jsonrpc !== '2.0') return;
+        if (message.id !== undefined && !message.method && waiting.has(message.id)) {
+          waiting.get(message.id)(message.result ?? {});
+          waiting.delete(message.id);
+          return;
+        }
+        switch (message.method) {
+          case 'ui/notifications/tool-result':
+            render(message.params?.structuredContent);
+            break;
+          case 'ui/notifications/host-context-changed':
+            applyContext(message.params);
+            break;
+          case 'ui/resource-teardown':
+            send({ id: message.id, result: {} });
+            break;
+        }
+      });
+
+      new ResizeObserver(() =>
+        notify('ui/notifications/size-changed', {
+          width: Math.ceil(document.documentElement.scrollWidth),
+          height: Math.ceil(document.documentElement.scrollHeight)
+        })
+      ).observe(document.body);
+
+      request('ui/initialize', {
+        protocolVersion: '2026-01-26',
+        appCapabilities: { availableDisplayModes: ['inline'] },
+        clientInfo: { name: 'puente-notice-card', version: '0.1.0' }
+      }).then(result => {
+        applyContext(result.hostContext);
+        notify('ui/notifications/initialized', {});
+      });
+    </script>
+  </body>
+</html>
