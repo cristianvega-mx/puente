@@ -6,6 +6,19 @@ import * as z from 'zod/v4';
 const client = new BedrockRuntimeClient({ region: process.env.AWS_REGION ?? 'us-east-1' });
 const modelId = process.env.BEDROCK_MODEL_ID ?? 'us.amazon.nova-pro-v1:0';
 
+// A public demo must not be able to run up the Bedrock bill: at most this many model calls per hour.
+const maxCallsPerHour = Number(process.env.BEDROCK_MAX_CALLS_PER_HOUR ?? 200);
+const recentCalls: number[] = [];
+
+function takeCallSlot(): void {
+  const hourAgo = Date.now() - 3_600_000;
+  while (recentCalls.length > 0 && recentCalls[0]! < hourAgo) recentCalls.shift();
+  if (recentCalls.length >= maxCallsPerHour) {
+    throw new Error('Puente is getting too many requests right now. Please try again in a few minutes.');
+  }
+  recentCalls.push(Date.now());
+}
+
 type StructuredRequest<T extends z.ZodType> = {
   system: string;
   prompt: string;
@@ -18,6 +31,7 @@ type StructuredRequest<T extends z.ZodType> = {
 // Gets JSON of a known shape from the model: the shape is offered as the only tool and the
 // model is required to call it, so Bedrock returns the tool input instead of free text.
 export async function generateStructured<T extends z.ZodType>(request: StructuredRequest<T>): Promise<z.output<T>> {
+  takeCallSlot();
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(request.schema, { io: 'input' }) as Record<string, unknown>;
   const response = await client.send(
     new ConverseCommand({

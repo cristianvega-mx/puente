@@ -8,10 +8,12 @@ import {
   createRequestStateCodec,
   inputRequired,
   inputResponse,
+  localhostAllowedHostnames,
+  localhostAllowedOrigins,
   McpServer,
   type ServerContext
 } from '@modelcontextprotocol/server';
-import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
+import { hostHeaderValidation, originValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod/v4';
 import { addDays, addEntries, calendar, sayDate, today, toICalendar, type CalendarEntry } from './calendar.js';
 import { childById, family, notices, resolveChild } from './data.js';
@@ -484,13 +486,25 @@ function buildServer(): McpServer {
 
 const handler = createMcpHandler(buildServer);
 const nodeHandler = toNodeHandler(handler);
-const validateHost = localhostHostValidation();
-const validateOrigin = localhostOriginValidation();
+
+// DNS-rebinding protection: only localhost by default; a deployment adds its public hostnames,
+// e.g. PUENTE_PUBLIC_HOSTS=puente.example.com, and binds to all interfaces with PUENTE_BIND=0.0.0.0.
+const publicHosts = (process.env.PUENTE_PUBLIC_HOSTS ?? '')
+  .split(',')
+  .map(host => host.trim())
+  .filter(Boolean);
+const validateHost = hostHeaderValidation([...localhostAllowedHostnames(), ...publicHosts]);
+const validateOrigin = originValidation([...localhostAllowedOrigins(), ...publicHosts]);
 const port = Number(process.env.PORT ?? 3000);
+const bindAddress = process.env.PUENTE_BIND ?? '127.0.0.1';
 
 createServer((req, res) => {
+  if (req.url === '/healthz') {
+    res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
+    return;
+  }
   if (!validateHost(req, res) || !validateOrigin(req, res)) return;
   void nodeHandler(req, res);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`Puente MCP server listening on http://127.0.0.1:${port}/mcp`);
+}).listen(port, bindAddress, () => {
+  console.log(`Puente MCP server listening on http://${bindAddress}:${port}/mcp`);
 });
