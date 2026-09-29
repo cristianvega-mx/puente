@@ -113,6 +113,27 @@ Severity scale: **Critical** (blocked, no workaround) · **High** (wrong output 
 
 ---
 
+## 8. Nova Pro goes silent when a tool result mixes text and JSON blocks
+
+- **Tool:** Amazon Bedrock Converse, `us.amazon.nova-pro-v1:0`, tool use
+- **Task:** Pass MCP tool results to the model: the tool's own sentence ("Guardé en el calendario: …"),
+  a resource link, and the structured JSON, as three blocks of one `toolResult`.
+- **Steps:** Recording the demo, the parent confirmed the calendar form with "Sí".
+- **Expected:** A spoken confirmation, then normal tool calls in later turns.
+- **Actual:** `stopReason: end_turn` with `content: []`. Storing that empty message made every
+  later turn fail with a ValidationException (empty content). With the empty reply replaced, the
+  model started writing tool calls as plain text (`{"child":"Sofía",…}Envié el mensaje…`), even
+  inventing a `send_message` tool, instead of calling `draft_teacher_message`. Replaying the saved
+  requests: same result every time with text + JSON; correct with JSON only or with text only.
+- **Severity:** High (the assistant claimed a message was sent when nothing was called)
+- **Workaround:** Send `structuredContent` alone as one JSON block when a tool has it, otherwise the
+  text joined into one block; never store an empty assistant message; fall back to the tool's
+  `spoken` field if the model still says nothing.
+- **Suggestion:** Document that mixed text/JSON tool results are unsupported for Nova, or reject
+  them with a clear ValidationException instead of an empty reply.
+
+---
+
 ## Product feedback notes (for the Devpost form)
 
 - **Used:** Amazon Bedrock (Converse API with tool use, Amazon Nova Pro; Nova 2 Lite tried), Bedrock API keys,

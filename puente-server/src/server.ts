@@ -376,7 +376,10 @@ function buildServer(): McpServer {
       inputSchema: z.object({
         child: z.string().describe('Child name or id, for example "Sofía".'),
         message: z.string().describe("What the parent wants to tell the teacher, in the parent's own words."),
-        noticeId: z.string().optional().describe('The notice the message is about, if any.')
+        noticeId: z
+          .string()
+          .optional()
+          .describe('The notice the message is about, only when the message is about that notice; leave it out otherwise.')
       }),
       outputSchema: z.object({
         saved: z.boolean(),
@@ -431,8 +434,8 @@ function buildServer(): McpServer {
         inputRequests: {
           approve: inputRequired.elicit({
             message:
-              `Este es el mensaje para ${kid.teacher.name}, traducido al español:\n\n"${draft.backTranslation}"\n\n` +
-              `En inglés:\n\n${draft.body}\n\n¿Lo guardo para enviarlo?`,
+              `¿Guardo este mensaje para ${kid.teacher.name}?\n\nEn español dice:\n\n"${draft.backTranslation}"\n\n` +
+              `En inglés:\n\n${draft.body}`,
             requestedSchema: {
               type: 'object',
               properties: { save: { type: 'boolean', title: 'Guardar el mensaje', default: true } },

@@ -8,15 +8,22 @@ Existing files are kept, so the script can be re-run cheaply.
 import asyncio
 import json
 import os
+import re
 import sys
 
 import edge_tts
 
 
+def speakable(text: str) -> str:
+    """What a Mexican Spanish voice should read: "$12" is dollars here, not pesos, and "Ms." is "miss"."""
+    text = re.sub(r"\$(\d+(?:\.\d+)?)", r"\1 dólares", text)
+    return re.sub(r"\bMs\.\s*", "miss ", text)
+
+
 async def synth(text: str, voice: str, path: str, rate: str) -> None:
     if os.path.exists(path):
         return
-    await edge_tts.Communicate(text, voice, rate=rate).save(path)
+    await edge_tts.Communicate(speakable(text), voice, rate=rate).save(path)
     print("wrote", path)
 
 
