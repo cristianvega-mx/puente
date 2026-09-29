@@ -13,6 +13,8 @@ behind on a trip day or is sent home from school.
 
 On an Echo Show, the notice appears as a bilingual card: the explanation in Spanish next to the original English text.
 
+**Demo video (under 3 minutes):** https://youtu.be/kg4YrGWWAJk
+
 This repository holds two projects:
 
 | Folder | What it is |
