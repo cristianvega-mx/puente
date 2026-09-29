@@ -15,12 +15,11 @@ On an Echo Show, the notice appears as a bilingual card: the explanation in Span
 
 **Demo video (under 3 minutes):** https://youtu.be/kg4YrGWWAJk
 
-This repository holds two projects:
-
-| Folder | What it is |
+| Where | What it is |
 |---|---|
 | [`puente-server/`](puente-server) | The Puente MCP server (TypeScript, Streamable HTTP, protocol 2026-07-28). |
-| [`alexa-plus-sim/`](alexa-plus-sim) | A standalone, open-source Alexa+ simulator: an Echo Show–style web host for any MCP server, with an Amazon Bedrock agent, voice in/out, on-screen elicitation forms and MCP Apps. |
+| [`video/`](video) | The scripts that recorded and edited the demo video (voices, screen recording, editing). |
+| [alexa-plus-sim](https://github.com/cristianvega-mx/alexa-plus-sim) (separate repository) | A standalone, open-source Alexa+ simulator: an Echo Show–style web host for any MCP server, with an Amazon Bedrock agent, voice in/out, on-screen elicitation forms and MCP Apps. |
 
 ## How it works
 
@@ -87,8 +86,9 @@ npm install
 npm start                   # http://127.0.0.1:3000/mcp
 npm run smoke               # in another terminal: exercises every tool, answering the forms
 
-# 2. The Alexa+ simulator
-cd ../alexa-plus-sim
+# 2. The Alexa+ simulator (its own repository), in another folder
+git clone https://github.com/cristianvega-mx/alexa-plus-sim
+cd alexa-plus-sim
 cp .env.example .env        # same Bedrock key; MCP_SERVER_URL points at Puente
 npm install
 npm start                   # open http://127.0.0.1:4000 in Chrome
