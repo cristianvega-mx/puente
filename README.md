@@ -51,11 +51,27 @@ Parents act on what Puente says, so the model is kept away from the facts it get
 
 - The model writes dates as `{YYYY-MM-DD}` tokens; the server renders the weekday ("viernes 9 de octubre").
 - School words ("permission slip", "early release"…) are explained by a hand-written glossary, not by the model.
-- Deadlines that only appear as tasks are added to the calendar in code, and the spoken line is checked for the first
-  deadline (one automatic retry).
+- Deadlines that only appear as tasks are added to the calendar in code. Every date the model mentions must also be
+  on its list of calendar dates, and the spoken line must include the earliest deadline; if not, the model is asked
+  again with the problem named.
 - Nothing is saved without the parent's confirmation, and nothing is ever sent.
 
 See [FRICTION-LOG.md](FRICTION-LOG.md) for what went wrong while building it and how we worked around it.
+
+## From the school inbox to Alexa
+
+In this prototype the six notices are sample data. In real use, notices would reach Puente like this (not built yet):
+
+1. **The family links Puente once** in the Alexa app and adds their children and schools.
+2. **School email is forwarded to the family's Puente address**: one notice at a time with the mail app's Forward
+   button, or automatically with a Gmail or Outlook filter that forwards only mail from the school or its messaging
+   app (ParentSquare, ClassDojo, SchoolMessenger…). The rest of the inbox never leaves it.
+3. **Puente accepts mail only from the school senders the family registered** and drops anything else unread.
+4. **Paper notices** from the backpack arrive as a photo from the parent's phone.
+
+Then the parent just asks: *"Alexa, ¿qué mandaron de la escuela?"* An Echo Show adds the bilingual card and tap-to-confirm
+forms; on a speaker without a screen, Alexa reads the dates and asks before saving them (`add_to_calendar` already
+falls back to a spoken confirmation when the device cannot show forms).
 
 ## Run it locally
 
