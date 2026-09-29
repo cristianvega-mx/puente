@@ -285,7 +285,7 @@ function buildServer(): McpServer {
         return inputRequired({
           inputRequests: {
             dates: inputRequired.elicit({
-              message: `¿Qué fechas del aviso "${notice.subject}" guardo en el calendario de la familia?`,
+              message: `¿Qué fechas de ${childById(notice.childId)?.name ?? 'este aviso'} guardo en el calendario?`,
               requestedSchema: {
                 type: 'object',
                 properties: {

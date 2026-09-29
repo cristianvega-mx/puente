@@ -1,0 +1,59 @@
+{
+  "voices": {
+    "narrator": "en-US-AndrewNeural",
+    "parent": "es-MX-DaliaNeural",
+    "alexa": "es-US-PalomaNeural"
+  },
+  "narration": {
+    "n1": "Millions of parents in the United States speak Spanish at home, but their children's schools write to them in English. Picture day. Field trips. Vaccination deadlines. Miss one notice, and a child stays behind on trip day.",
+    "n2": "Puente is an MCP server that lets Alexa+ handle those notices in Spanish. It explains them, puts the dates on the family calendar, and writes replies to teachers in English.",
+    "n3": "Here is Puente in our Alexa+ simulator, an open-source, Echo Show style host we built for this project. A parent asks, in Spanish, what the school sent.",
+    "n4": "Alexa calls Puente's list notices tool and answers in Spanish. On the right, you can see every MCP call.",
+    "n5": "Explain notice asks Amazon Nova Pro, on Amazon Bedrock, to explain it in plain Spanish, and answers with an MCP App: a bilingual card beside the original English. The server renders weekdays and checks deadlines, so the dates are always right.",
+    "n6": "Saving needs the parent's OK. Puente answers with an input required result, from the new MCP protocol version, and the simulator shows the form. She just says yes.",
+    "n7": "Last, she dictates a note for the teacher. Puente writes it in English and shows her a Spanish translation. Nothing is saved without her approval, and Puente never sends anything on its own.",
+    "n8": "Under the hood: a Streamable HTTP MCP server with six tools, resources, elicitation and an MCP App, powered by Amazon Nova Pro on Amazon Bedrock. The simulator runs its own Bedrock agent. Both are open source, and live today.",
+    "n9": "Puente. A bridge between families and their children's schools."
+  },
+  "demo": [
+    {
+      "narration": "n3"
+    },
+    {
+      "id": "p1",
+      "say": "Alexa, ¿qué mandaron de la escuela de Sofía?"
+    },
+    {
+      "narration": "n4"
+    },
+    {
+      "id": "p2",
+      "say": "¿Qué dice el de la excursión?"
+    },
+    {
+      "narration": "n5"
+    },
+    {
+      "id": "p3",
+      "say": "Guárdalo en el calendario, por favor."
+    },
+    {
+      "narration": "n6"
+    },
+    {
+      "id": "p4",
+      "say": "Sí."
+    },
+    {
+      "id": "p5",
+      "say": "Dile a la maestra de Sofía que el lunes 5 de octubre va a faltar porque tiene cita con el dentista."
+    },
+    {
+      "narration": "n7"
+    },
+    {
+      "id": "p6",
+      "say": "Sí, guárdalo."
+    }
+  ]
+}
