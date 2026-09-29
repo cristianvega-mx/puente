@@ -29,6 +29,7 @@ echo "3/5 slides and screen recording"
 rm -rf rec slides
 docker run --rm --network easypanel -v /opt/video/work:/work -w /work "$PW_IMAGE" sh -c \
   "npm i --no-save --silent --no-audit --no-fund playwright@1.55.0 >/dev/null && node render_slides.mjs && node record.mjs"
+docker rm -f puente-rec-mcp puente-rec-sim >/dev/null
 
 echo "4/5 Alexa's voice"
 python3 -c "import json; t = json.load(open('timeline.json')); json.dump([{'id': e['id'], 'text': e['text']} for e in t['events'] if e['type'] == 'alexa'], open('alexa_lines.json', 'w'), ensure_ascii=False)"
@@ -36,4 +37,3 @@ docker run --rm -v /opt/video/work:/work --entrypoint python tts:latest tts.py p
 
 echo "5/5 editing"
 python3 build.py /opt/video/work
-docker rm -f puente-rec-mcp puente-rec-sim >/dev/null

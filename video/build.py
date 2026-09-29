@@ -85,13 +85,22 @@ def remap(t):
 
 
 demo_length = sum(stop - start for start, stop in keep)
-trims = ";".join(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{i}]" for i, (a, b) in enumerate(keep))
-joined = "".join(f"[v{i}]" for i in range(len(keep)))
+# Each piece is cut in its own ffmpeg run: several trims of one input in a single filter graph keep
+# every decoded frame in memory (6 GB for this recording, and the VPS killed ffmpeg).
+pieces = []
+for i, (a, b) in enumerate(keep):
+    fades = ["fade=t=in:st=0:d=0.4"] if i == 0 else []
+    if i == len(keep) - 1:
+        fades.append(f"fade=t=out:st={b - a - 0.4:.3f}:d=0.4")
+    piece = f"{OUT}/piece-{i}.mp4"
+    run(["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.3f}", "-i", raw_video, "-t", f"{b - a:.3f}",
+         "-vf", ",".join(["fps=30", "format=yuv420p", *fades]), "-an",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "20", piece])
+    pieces.append(piece)
+with open(f"{OUT}/pieces.txt", "w") as listing:
+    listing.writelines(f"file '{piece}'\n" for piece in pieces)
 demo_video = f"{OUT}/demo-video.mp4"
-run(["ffmpeg", "-v", "error", "-y", "-i", raw_video, "-filter_complex",
-     f"{trims};{joined}concat=n={len(keep)}:v=1:a=0,fps=30,format=yuv420p,"
-     f"fade=t=in:st=0:d=0.4,fade=t=out:st={demo_length - 0.4:.3f}:d=0.4[v]",
-     "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "20", demo_video])
+run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", f"{OUT}/pieces.txt", "-c", "copy", demo_video])
 
 # 2. Voices on the edited timeline. Alexa's line is sped up slightly if it would run into what follows.
 voices = []

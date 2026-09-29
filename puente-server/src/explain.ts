@@ -90,19 +90,31 @@ async function requestExplanation(notice: Notice): Promise<Explanation> {
     '',
     notice.body
   ].join('\n');
-  const ask = () =>
+  const ask = (note?: string) =>
     generateStructured({
       system,
-      prompt,
+      prompt: note ? `${prompt}\n\nNote: ${note}` : prompt,
       toolName: 'record_explanation',
       toolDescription: 'Record the explanation of the school notice for the parent.',
       schema: explanationSchema
     });
 
-  // The model sometimes leaves the first deadline out of what Alexa says; one retry fixes it most of the time.
+  // The model sometimes says a deadline without recording it (so it never reaches the calendar), or
+  // records one without saying it. One retry that names the problem fixes it.
   let draft = await ask();
-  if (!mentionsFirstDeadline(draft)) draft = await ask();
+  const problem = findProblem(draft);
+  if (problem) {
+    const retry = await ask(`an earlier answer had this problem, avoid it: ${problem}`);
+    if (!findProblem(retry) || recordedDates(retry).size > recordedDates(draft).size) draft = retry;
+  }
   return finish(draft, child?.name ?? '');
+}
+
+function recordedDates(explanation: Explanation): Set<string> {
+  return new Set([
+    ...explanation.events.map(event => event.date),
+    ...explanation.actions.flatMap(action => (action.by ? [action.by] : []))
+  ]);
 }
 
 function firstDeadline(explanation: Explanation): string | undefined {
@@ -112,9 +124,19 @@ function firstDeadline(explanation: Explanation): string | undefined {
     .sort()[0];
 }
 
-function mentionsFirstDeadline(explanation: Explanation): boolean {
+function findProblem(explanation: Explanation): string | undefined {
+  const recorded = recordedDates(explanation);
+  const unrecorded = [...`${explanation.summary} ${explanation.spoken}`.matchAll(dateToken)]
+    .map(match => match[1])
+    .filter(date => !recorded.has(date));
+  if (unrecorded.length > 0) {
+    return `summary or spoken mention ${[...new Set(unrecorded)].join(', ')}, which is missing from events (and from the "by" of its action).`;
+  }
   const deadline = firstDeadline(explanation);
-  return !deadline || explanation.spoken.includes(`{${deadline}}`);
+  if (deadline && !explanation.spoken.includes(`{${deadline}}`)) {
+    return `spoken does not mention the earliest deadline, {${deadline}}.`;
+  }
+  return undefined;
 }
 
 // Fixes what the model is least reliable at: weekdays, and deadlines that only appear as tasks.
