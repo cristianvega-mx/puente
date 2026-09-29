@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import {
   acceptedContent,
+  CLIENT_CAPABILITIES_META_KEY,
   createMcpHandler,
   createRequestStateCodec,
   inputRequired,
   inputResponse,
-  McpServer
+  McpServer,
+  type ServerContext
 } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod/v4';
@@ -77,6 +79,13 @@ const calendarEntry = z.object({
 });
 
 const dateChoice = z.object({ dates: z.array(z.string()), remindDayBefore: z.boolean().optional() });
+
+// Clients on protocol 2026-07-28 state their capabilities in every request; older ones cannot get forms here.
+function canShowForms(ctx: ServerContext): boolean {
+  const envelope = ctx.mcpReq.envelope as Record<string, unknown> | undefined;
+  const capabilities = envelope?.[CLIENT_CAPABILITIES_META_KEY] as { elicitation?: unknown } | undefined;
+  return Boolean(capabilities?.elicitation);
+}
 
 function findNotice(id: string) {
   const notice = notices.find(candidate => candidate.id === id);
@@ -204,14 +213,23 @@ function buildServer(): McpServer {
       description:
         'Put the dates from one school notice on the family calendar. Before saving, the parent sees a form to choose ' +
         'which dates to keep and whether to get a reminder the day before; nothing is saved if they decline.',
-      inputSchema: z.object({ noticeId: z.string().describe('Notice id, for example "n-002".') }),
+      inputSchema: z.object({
+        noticeId: z.string().describe('Notice id, for example "n-002".'),
+        confirmedByVoice: z
+          .boolean()
+          .optional()
+          .describe(
+            'Only on devices that cannot show forms: true after you read the dates to the parent and they said yes to saving them all.'
+          )
+      }),
       outputSchema: z.object({
         added: z.array(calendarEntry),
         alreadyOnCalendar: z.number().int(),
-        calendarUri: z.string()
+        calendarUri: z.string(),
+        toConfirm: z.array(z.object({ date: z.string(), title: z.string() })).optional()
       })
     },
-    async ({ noticeId }, ctx) => {
+    async ({ noticeId, confirmedByVoice }, ctx) => {
       const notice = findNotice(noticeId);
       const { events } = await explainNotice(notice);
       const candidates = events.map((event, index) => ({
@@ -225,6 +243,40 @@ function buildServer(): McpServer {
         return { content: [{ type: 'text' as const, text: message }], structuredContent: output };
       };
       if (candidates.length === 0) return nothing('Este aviso no trae fechas para el calendario.');
+
+      const save = (chosen: CalendarEntry[]) => {
+        const added = addEntries(chosen);
+        const output = { added, alreadyOnCalendar: chosen.length - added.length, calendarUri };
+        const lines = added.map(entry => `• ${sayDate(entry.date)}: ${entry.title}`);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: added.length > 0 ? `Guardé en el calendario:\n${lines.join('\n')}` : 'Esas fechas ya estaban en el calendario.'
+            },
+            { type: 'resource_link' as const, uri: calendarUri, name: 'calendario-escuela.ics', mimeType: 'text/calendar' }
+          ],
+          structuredContent: output
+        };
+      };
+
+      // Voice-only devices: the assistant reads the dates, the parent says yes, and it calls again with confirmedByVoice.
+      if (!canShowForms(ctx)) {
+        if (confirmedByVoice) return save(candidates.map(candidate => ({ ...candidate, remindDayBefore: true })));
+        const toConfirm = candidates.map(({ date, title }) => ({ date, title }));
+        const lines = toConfirm.map(entry => `• ${sayDate(entry.date)}: ${entry.title}`);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                'Nothing saved yet: this device cannot show a confirmation form. Read these dates to the parent, ask whether ' +
+                `to save them all, and if they say yes call add_to_calendar again with confirmedByVoice: true.\n${lines.join('\n')}`
+            }
+          ],
+          structuredContent: { added: [], alreadyOnCalendar: 0, calendarUri, toConfirm }
+        };
+      }
 
       const answer = inputResponse(ctx.mcpReq.inputResponses, 'dates');
       if (answer.kind === 'missing') {
@@ -260,22 +312,11 @@ function buildServer(): McpServer {
       const choice = acceptedContent(ctx.mcpReq.inputResponses, 'dates', dateChoice);
       if (!choice) throw new Error('The date selection was not valid. Call add_to_calendar again.');
 
-      const chosen: CalendarEntry[] = candidates
-        .filter(candidate => choice.dates.includes(candidate.id))
-        .map(candidate => ({ ...candidate, remindDayBefore: choice.remindDayBefore ?? true }));
-      const added = addEntries(chosen);
-      const output = { added, alreadyOnCalendar: chosen.length - added.length, calendarUri };
-      const lines = added.map(entry => `• ${sayDate(entry.date)}: ${entry.title}`);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: added.length > 0 ? `Guardé en el calendario:\n${lines.join('\n')}` : 'Esas fechas ya estaban en el calendario.'
-          },
-          { type: 'resource_link', uri: calendarUri, name: 'calendario-escuela.ics', mimeType: 'text/calendar' }
-        ],
-        structuredContent: output
-      };
+      return save(
+        candidates
+          .filter(candidate => choice.dates.includes(candidate.id))
+          .map(candidate => ({ ...candidate, remindDayBefore: choice.remindDayBefore ?? true }))
+      );
     }
   );
 
