@@ -22,6 +22,7 @@ export type Notice = {
 
 export const family = {
   familyName: 'Hernández',
+  parentName: 'María Hernández',
   city: 'Houston, TX',
   parentLanguage: 'es',
   children: [

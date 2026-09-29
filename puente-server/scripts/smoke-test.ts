@@ -42,6 +42,14 @@ console.log('Dates found:', explanation.events.length, '| glossary:', explanatio
 const saved = await client.callTool({ name: 'add_to_calendar', arguments: { noticeId: 'n-002' } });
 console.log(saved.content.find(block => block.type === 'text')?.text);
 
+const email = await client.callTool({
+  name: 'draft_teacher_message',
+  arguments: { child: 'Sofía', message: 'Sofía va a faltar el lunes 5 de octubre porque tiene cita con el dentista.' }
+});
+const draft = email.structuredContent as { saved: boolean; subject?: string; body?: string; mailto?: string };
+console.log('Draft saved:', draft.saved, '|', draft.subject);
+console.log(draft.body);
+
 const upcoming = await client.callTool({ name: 'list_upcoming', arguments: { days: 30 } });
 console.log('Upcoming entries:', (upcoming.structuredContent as { entries: unknown[] }).entries.length);
 

@@ -1,13 +1,31 @@
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { acceptedContent, createMcpHandler, inputRequired, inputResponse, McpServer } from '@modelcontextprotocol/server';
+import {
+  acceptedContent,
+  createMcpHandler,
+  createRequestStateCodec,
+  inputRequired,
+  inputResponse,
+  McpServer
+} from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import * as z from 'zod/v4';
-import { addDays, addEntries, calendar, today, toICalendar, type CalendarEntry } from './calendar.js';
+import { addDays, addEntries, calendar, sayDate, today, toICalendar, type CalendarEntry } from './calendar.js';
 import { childById, family, notices, resolveChild } from './data.js';
 import { actionSchema, costSchema, eventSchema, explainNotice } from './explain.js';
 import { glossaryFor } from './glossary.js';
+import { drafts, mailtoLink, saveDraft, writeDraft, type Draft } from './messages.js';
 
 const calendarUri = 'puente://family/calendar.ics';
+const draftsUri = 'puente://family/drafts';
+
+// A draft waiting for the parent's OK travels inside the signed requestState, so the text saved
+// is exactly the text the parent approved. Set PUENTE_STATE_SECRET when running more than one process.
+type PendingDraft = { draft: Draft };
+const stateCodec = createRequestStateCodec<PendingDraft>({
+  key: process.env.PUENTE_STATE_SECRET ?? randomBytes(32),
+  bind: ctx => ctx.mcpReq.method
+});
 
 const noticeSummary = z.object({
   id: z.string(),
@@ -60,13 +78,6 @@ function findNotice(id: string) {
   return notice;
 }
 
-// "jueves, 15 de octubre" — how the parent reads a date.
-function spanishDay(date: string): string {
-  return new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(
-    new Date(`${date}T12:00:00Z`)
-  );
-}
-
 function summarize(notice: (typeof notices)[number]) {
   const child = childById(notice.childId);
   return {
@@ -82,7 +93,7 @@ function summarize(notice: (typeof notices)[number]) {
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: 'puente', version: '0.2.0' });
+  const server = new McpServer({ name: 'puente', version: '0.2.0' }, { requestState: { verify: stateCodec.verify } });
 
   server.registerTool(
     'list_notices',
@@ -222,7 +233,7 @@ function buildServer(): McpServer {
                     items: {
                       anyOf: candidates.map(candidate => ({
                         const: candidate.id,
-                        title: `${spanishDay(candidate.date)}: ${candidate.title}`
+                        title: `${sayDate(candidate.date)}: ${candidate.title}`
                       }))
                     },
                     default: candidates.map(candidate => candidate.id)
@@ -246,7 +257,7 @@ function buildServer(): McpServer {
         .map(candidate => ({ ...candidate, remindDayBefore: choice.remindDayBefore ?? true }));
       const added = addEntries(chosen);
       const output = { added, alreadyOnCalendar: chosen.length - added.length, calendarUri };
-      const lines = added.map(entry => `• ${spanishDay(entry.date)}: ${entry.title}`);
+      const lines = added.map(entry => `• ${sayDate(entry.date)}: ${entry.title}`);
       return {
         content: [
           {
@@ -287,6 +298,97 @@ function buildServer(): McpServer {
         structuredContent: output
       };
     }
+  );
+
+  server.registerTool(
+    'draft_teacher_message',
+    {
+      title: "Write a message to a child's teacher",
+      description:
+        "Write a short email in English to a child's teacher from what the parent says in their own words (an absence, " +
+        'a question about a notice, volunteering). The parent reads a translation and approves it before the draft ' +
+        'is saved. Puente never sends email itself; the result includes a mailto link the parent can open.',
+      inputSchema: z.object({
+        child: z.string().describe('Child name or id, for example "Sofía".'),
+        message: z.string().describe("What the parent wants to tell the teacher, in the parent's own words."),
+        noticeId: z.string().optional().describe('The notice the message is about, if any.')
+      }),
+      outputSchema: z.object({
+        saved: z.boolean(),
+        draftId: z.string().optional(),
+        to: z.string(),
+        subject: z.string().optional(),
+        body: z.string().optional(),
+        backTranslation: z.string().optional(),
+        mailto: z.string().optional()
+      })
+    },
+    async ({ child, message, noticeId }, ctx) => {
+      const kid = resolveChild(child);
+      if (!kid) throw new Error(`No child named "${child}".`);
+      const to = `${kid.teacher.name} <${kid.teacher.email}>`;
+
+      // Second round: the parent answered the confirmation form for the draft carried in requestState.
+      const pending = ctx.mcpReq.requestState<PendingDraft>();
+      if (pending) {
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'approve', z.object({ save: z.boolean() }));
+        if (!answer?.save) {
+          const output = { saved: false, to };
+          return { content: [{ type: 'text', text: 'No guardé el mensaje.' }], structuredContent: output };
+        }
+        const saved = saveDraft(pending.draft);
+        const mailto = mailtoLink(saved);
+        const output = {
+          saved: true,
+          draftId: saved.id,
+          to,
+          subject: saved.subject,
+          body: saved.body,
+          backTranslation: saved.backTranslation,
+          mailto
+        };
+        return {
+          content: [
+            { type: 'text', text: `Guardé el mensaje para ${kid.teacher.name}. Puede enviarlo desde su correo.` },
+            { type: 'text', text: JSON.stringify(output) }
+          ],
+          structuredContent: output
+        };
+      }
+
+      // First round: write the draft and ask the parent to approve it.
+      const notice = noticeId ? findNotice(noticeId) : undefined;
+      const written = await writeDraft(kid, message, notice);
+      const draft: Draft = { ...written, childId: kid.id, teacherName: kid.teacher.name, teacherEmail: kid.teacher.email };
+      return inputRequired({
+        inputRequests: {
+          approve: inputRequired.elicit({
+            message:
+              `Este es el mensaje para ${kid.teacher.name}, traducido al español:\n\n"${draft.backTranslation}"\n\n` +
+              `En inglés:\n\n${draft.body}\n\n¿Lo guardo para enviarlo?`,
+            requestedSchema: {
+              type: 'object',
+              properties: { save: { type: 'boolean', title: 'Guardar el mensaje', default: true } },
+              required: ['save']
+            }
+          })
+        },
+        requestState: await stateCodec.mint({ draft }, ctx)
+      });
+    }
+  );
+
+  server.registerResource(
+    'teacher-drafts',
+    draftsUri,
+    {
+      title: 'Messages for teachers',
+      description: 'Email drafts the parent approved, in English with their Spanish translation.',
+      mimeType: 'application/json'
+    },
+    async uri => ({
+      contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(drafts) }]
+    })
   );
 
   server.registerResource(

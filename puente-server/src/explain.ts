@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import { generateStructured } from './bedrock.js';
+import { sayDate } from './calendar.js';
 import { childById, family, type Notice } from './data.js';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
@@ -31,7 +32,7 @@ export const explanationSchema = z.object({
     .string()
     .describe(
       'What Alexa says out loud to the parent, under 35 words: starts with the child\'s name (for example "Sofía tiene…"), ' +
-        'gives the key fact with its date, then the one thing the parent must do next with its deadline. ' +
+        'gives the key fact with its date, then the task with the earliest deadline and that deadline. ' +
         'No URLs, codes or phone numbers.'
     ),
   urgency: z
@@ -59,11 +60,13 @@ const system = [
   'Use only facts stated in the notice. Never invent dates, deadlines, amounts, links or requirements,',
   'and never add medical, legal or financial facts the notice does not state.',
   'Resolve dates to YYYY-MM-DD using the year the notice was received; a month earlier than that means the next year.',
-  'Use YYYY-MM-DD only in date fields; in sentences write dates the way people say them ("el jueves 8 de octubre").',
+  'In summary and spoken, write every date as the token {YYYY-MM-DD}, braces included (for example "el {2026-10-08}");',
+  'Puente turns each token into the spoken date with its weekday, so never write weekday or month names yourself.',
   'Say "excursión" for field trip and "permiso" for permission slip.',
   'Keep names of people, schools, portals and apps as written.'
 ].join(' ');
 
+const dateToken = /\{(\d{4}-\d{2}-\d{2})\}/g;
 const cache = new Map<string, Promise<Explanation>>();
 
 // One Bedrock call per notice; later calls (and retries of the same tool call) reuse it.
@@ -77,7 +80,7 @@ export function explainNotice(notice: Notice): Promise<Explanation> {
   return explanation;
 }
 
-function requestExplanation(notice: Notice): Promise<Explanation> {
+async function requestExplanation(notice: Notice): Promise<Explanation> {
   const child = childById(notice.childId);
   const prompt = [
     `Parent's language: ${family.parentLanguage}.`,
@@ -87,11 +90,42 @@ function requestExplanation(notice: Notice): Promise<Explanation> {
     '',
     notice.body
   ].join('\n');
-  return generateStructured({
-    system,
-    prompt,
-    toolName: 'record_explanation',
-    toolDescription: 'Record the explanation of the school notice for the parent.',
-    schema: explanationSchema
-  });
+  const ask = () =>
+    generateStructured({
+      system,
+      prompt,
+      toolName: 'record_explanation',
+      toolDescription: 'Record the explanation of the school notice for the parent.',
+      schema: explanationSchema
+    });
+
+  // The model sometimes leaves the first deadline out of what Alexa says; one retry fixes it most of the time.
+  let draft = await ask();
+  if (!mentionsFirstDeadline(draft)) draft = await ask();
+  return finish(draft, child?.name ?? '');
+}
+
+function firstDeadline(explanation: Explanation): string | undefined {
+  return explanation.actions
+    .map(action => action.by)
+    .filter((by): by is string => Boolean(by))
+    .sort()[0];
+}
+
+function mentionsFirstDeadline(explanation: Explanation): boolean {
+  const deadline = firstDeadline(explanation);
+  return !deadline || explanation.spoken.includes(`{${deadline}}`);
+}
+
+// Fixes what the model is least reliable at: weekdays, and deadlines that only appear as tasks.
+function finish(explanation: Explanation, childName: string): Explanation {
+  const events = [...explanation.events];
+  for (const action of explanation.actions) {
+    if (action.by && !events.some(event => event.date === action.by && event.kind === 'deadline')) {
+      events.push({ title: `${childName}: ${action.what.replace(/\.$/, '')}`, date: action.by, kind: 'deadline' });
+    }
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date));
+  const say = (text: string) => text.replace(dateToken, (_token, date: string) => sayDate(date));
+  return { ...explanation, summary: say(explanation.summary), spoken: say(explanation.spoken), events };
 }

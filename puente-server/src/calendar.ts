@@ -29,6 +29,14 @@ export function today(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
 }
 
+// "viernes 9 de octubre": how a date is said in Spanish. Weekdays always come from here, never from the model.
+export function sayDate(date: string): string {
+  const parts = new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+    .formatToParts(new Date(`${date}T12:00:00Z`));
+  const part = (type: string) => parts.find(candidate => candidate.type === type)?.value ?? '';
+  return `${part('weekday')} ${part('day')} de ${part('month')}`;
+}
+
 export function addDays(date: string, days: number): string {
   const next = new Date(`${date}T12:00:00Z`);
   next.setUTCDate(next.getUTCDate() + days);
