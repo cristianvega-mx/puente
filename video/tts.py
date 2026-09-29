@@ -32,7 +32,7 @@ async def main() -> None:
     out = sys.argv[2]
     os.makedirs(out, exist_ok=True)
     voices = plan["voices"]
-    jobs = [synth(text, voices["narrator"], f"{out}/{key}.mp3", "+3%") for key, text in plan["narration"].items()]
+    jobs = [synth(text, voices["narrator"], f"{out}/{key}.mp3", "+10%") for key, text in plan["narration"].items()]
     jobs += [synth(step["say"], voices["parent"], f"{out}/{step['id']}.mp3", "+0%") for step in plan["demo"] if "say" in step]
     if len(sys.argv) > 3:
         for line in json.load(open(sys.argv[3], encoding="utf-8")):

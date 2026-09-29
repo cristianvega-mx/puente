@@ -3,8 +3,8 @@
 
 Reads WORK/plan.json, WORK/timeline.json (from record.mjs), the voice clips in WORK/audio and the
 slide images in WORK/slides, and writes WORK/out/puente-demo.mp4 (1920x1080, 30 fps, H.264/AAC).
-The waits while the model thinks are cut down to about a second, and every voice clip is placed
-on the edited timeline where it belongs.
+The waits while the model thinks are cut down to about a second, and so are the still moments after
+Alexa or the narrator stop talking; every voice clip is placed on the edited timeline where it belongs.
 """
 import json
 import os
@@ -57,14 +57,29 @@ events = timeline["events"]
 raw_video = timeline["video"].replace("/work", WORK, 1)
 clip_len = lambda name: length(f"{AUDIO}/{name}.mp3")
 
-# 1. Keep the recording from "ready" to "end", minus most of each wait for the model.
+# 1. Every voice clip (path, where it starts in the raw recording, who speaks).
+CLIPS = {"narration": ("{id}.mp3", 0.15), "parent": ("{id}.mp3", 0.0), "alexa": ("alexa-{id}.mp3", 0.1)}
+voices = sorted(
+    ((f"{AUDIO}/{CLIPS[e['type']][0].format(id=e['id'])}", e["t"] + CLIPS[e["type"]][1], e["type"])
+     for e in events if e["type"] in CLIPS),
+    key=lambda voice: voice[1])
+lengths = {path: length(path) for path, _, _ in voices}
+
+# 2. Keep the recording from "ready" to just after the last voice, minus most of each wait for the
+#    model and of each still moment after Alexa or the narrator stop talking.
 ready = next(e["t"] for e in events if e["type"] == "ready")
-end = next(e["t"] for e in events if e["type"] == "end")
+last_path, last_start, _ = voices[-1]
+end = min(next(e["t"] for e in events if e["type"] == "end"), last_start + lengths[last_path] + 1.5)
 cuts = []
 for sent in (e for e in events if e["type"] == "sent"):
     answer = next(e for e in events if e["type"] == "alexa" and e["id"] == sent["id"])
     if answer["t"] - sent["t"] > 1.6:
         cuts.append((sent["t"] + 0.6, answer["t"] - 0.5))
+for (path, start, who), (_, next_start, _) in zip(voices, voices[1:]):
+    still_from, still_to = start + lengths[path] + 0.5, next_start - 0.4
+    if who != "parent" and still_to - still_from > 0.3:
+        cuts.append((still_from, still_to))
+cuts.sort()
 keep, cursor = [], ready - 0.2
 for cut_start, cut_end in cuts:
     keep.append((cursor, cut_start))
@@ -102,20 +117,12 @@ with open(f"{OUT}/pieces.txt", "w") as listing:
 demo_video = f"{OUT}/demo-video.mp4"
 run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", f"{OUT}/pieces.txt", "-c", "copy", demo_video])
 
-# 2. Voices on the edited timeline. Alexa's line is sped up slightly if it would run into what follows.
-voices = []
-for e in events:
-    if e["type"] == "narration":
-        voices.append([f"{AUDIO}/{e['id']}.mp3", remap(e["t"]) + 0.15])
-    elif e["type"] == "parent":
-        voices.append([f"{AUDIO}/{e['id']}.mp3", remap(e["t"])])
-    elif e["type"] == "alexa":
-        voices.append([f"{AUDIO}/alexa-{e['id']}.mp3", remap(e["t"]) + 0.1])
-voices.sort(key=lambda v: v[1])
+# 3. Voices on the edited timeline. A line is sped up slightly if it would run into what follows.
+edited = [(path, remap(start)) for path, start, _ in voices]
 placed = []
-for i, (path, start) in enumerate(voices):
-    room = (voices[i + 1][1] if i + 1 < len(voices) else demo_length) - start - 0.1
-    tempo = max(1.0, length(path) / room) if room > 0 else 1.0
+for i, (path, start) in enumerate(edited):
+    room = (edited[i + 1][1] if i + 1 < len(edited) else demo_length) - start - 0.1
+    tempo = max(1.0, lengths[path] / room) if room > 0 else 1.0
     if tempo > 1.0:
         print(f"note: {os.path.basename(path)} sped up x{tempo:.2f} to fit")
     placed.append((path, start, min(tempo, 1.3)))
@@ -125,7 +132,7 @@ demo = f"{OUT}/2-demo.mp4"
 run(["ffmpeg", "-v", "error", "-y", "-i", demo_video, "-i", demo_audio, "-map", "0:v", "-map", "1:a", *ENC,
      "-shortest", demo])
 
-# 3. Slides with the narrator.
+# 4. Slides with the narrator.
 n1, n2, n8, n9 = (clip_len(k) for k in ("n1", "n2", "n8", "n9"))
 intro_len = 0.6 + n1 + 0.5 + n2 + 0.9
 slide_segment(f"{WORK}/slides/s1.png",
@@ -133,7 +140,7 @@ slide_segment(f"{WORK}/slides/s1.png",
 slide_segment(f"{WORK}/slides/s2.png", [(f"{AUDIO}/n8.mp3", 0.5, 1.0)], 0.5 + n8 + 1.0, f"{OUT}/3-architecture.mp4")
 slide_segment(f"{WORK}/slides/s3.png", [(f"{AUDIO}/n9.mp3", 0.4, 1.0)], 0.4 + n9 + 2.2, f"{OUT}/4-outro.mp4")
 
-# 4. One file, loudness evened out.
+# 5. One file, loudness evened out.
 listing = f"{OUT}/parts.txt"
 with open(listing, "w") as parts:
     for name in ("1-intro", "2-demo", "3-architecture", "4-outro"):
