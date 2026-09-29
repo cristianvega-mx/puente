@@ -109,6 +109,18 @@ function summarize(notice: (typeof notices)[number]) {
   };
 }
 
+// What the assistant can say after saving, e.g. "Listo, guardé 2 fechas de Sofía en el calendario: el viernes
+// 9 de octubre y el jueves 15 de octubre."
+function savedSentence(added: CalendarEntry[], childName: string | undefined): string {
+  if (added.length === 0) return 'Esas fechas ya estaban en el calendario.';
+  const dates = added.map(entry => `el ${sayDate(entry.date)}`);
+  const list = dates.length > 1 ? `${dates.slice(0, -1).join(', ')} y ${dates.at(-1)}` : dates[0];
+  const whose = childName ? ` de ${childName}` : '';
+  return added.length === 1
+    ? `Listo, guardé en el calendario la fecha${whose}: ${list}.`
+    : `Listo, guardé ${added.length} fechas${whose} en el calendario: ${list}.`;
+}
+
 function buildServer(): McpServer {
   const server = new McpServer({ name: 'puente', version: '0.2.0' }, { requestState: { verify: stateCodec.verify } });
 
@@ -228,6 +240,7 @@ function buildServer(): McpServer {
         added: z.array(calendarEntry),
         alreadyOnCalendar: z.number().int(),
         calendarUri: z.string(),
+        spoken: z.string().optional(),
         toConfirm: z.array(z.object({ date: z.string(), title: z.string() })).optional()
       })
     },
@@ -241,14 +254,15 @@ function buildServer(): McpServer {
         noticeId: notice.id
       }));
       const nothing = (message: string) => {
-        const output = { added: [], alreadyOnCalendar: 0, calendarUri };
+        const output = { added: [], alreadyOnCalendar: 0, calendarUri, spoken: message };
         return { content: [{ type: 'text' as const, text: message }], structuredContent: output };
       };
       if (candidates.length === 0) return nothing('Este aviso no trae fechas para el calendario.');
 
       const save = (chosen: CalendarEntry[]) => {
         const added = addEntries(chosen);
-        const output = { added, alreadyOnCalendar: chosen.length - added.length, calendarUri };
+        const spoken = savedSentence(added, childById(notice.childId)?.name);
+        const output = { added, alreadyOnCalendar: chosen.length - added.length, calendarUri, spoken };
         const lines = added.map(entry => `• ${sayDate(entry.date)}: ${entry.title}`);
         return {
           content: [
@@ -371,7 +385,8 @@ function buildServer(): McpServer {
         subject: z.string().optional(),
         body: z.string().optional(),
         backTranslation: z.string().optional(),
-        mailto: z.string().optional()
+        mailto: z.string().optional(),
+        spoken: z.string().optional()
       })
     },
     async ({ child, message, noticeId }, ctx) => {
@@ -384,7 +399,7 @@ function buildServer(): McpServer {
       if (pending) {
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'approve', z.object({ save: z.boolean() }));
         if (!answer?.save) {
-          const output = { saved: false, to };
+          const output = { saved: false, to, spoken: 'No guardé el mensaje.' };
           return { content: [{ type: 'text', text: 'No guardé el mensaje.' }], structuredContent: output };
         }
         const saved = saveDraft(pending.draft);
@@ -396,7 +411,8 @@ function buildServer(): McpServer {
           subject: saved.subject,
           body: saved.body,
           backTranslation: saved.backTranslation,
-          mailto
+          mailto,
+          spoken: `Listo, guardé el mensaje para ${kid.teacher.name}. Puede enviarlo desde su correo.`
         };
         return {
           content: [
